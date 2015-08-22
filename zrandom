@@ -1,0 +1,193 @@
+%%%-------------------------------------------------------------------
+%%% @author DJ-026
+%%% @copyright (C) 2014, <COMPANY>
+%%% @doc
+%%%
+%%% @end
+%%% Created : 14. 十一月 2014 17:11
+%%%-------------------------------------------------------------------
+-module(zrandom).
+-author("DJ-026").
+
+
+%%%===================================================================
+%%% API
+%%%===================================================================
+-export([test/0]).
+%% API
+-export([
+	get_random/1,
+	get_random/2,
+	set_random_seed/1,
+    set_random_seed_by_current_time/0,  %设置根据时间和进程本身
+    fake_random_with_seed/3,            %临时设置种子，计算一个随机数，不影响原来的随机分布
+    choose_from_n/2,                     %从N里面随机选Count个，不重复
+    fn_do/1,
+    fn_loop/3,
+    fn_judge_range/3,
+    fn_write_result_2_file/2,
+    fn_open_file/1,
+    fn_close_file/1
+]).
+
+-define(RESULT_FILE_PATH,   "./testResult").
+-define(RANDOM_SPEED,       1000000).
+-define(LOOP_NUM,           100).
+-define(RANGE_100,          100).
+-define(RANGE_1000,         1000).
+-define(RANGE_10000,        10000).
+-define(RANGE_100000,       100000).
+
+test()  ->
+    %spawn(zrandom,fn_do,[?RANGE_100]),
+    %spawn(zrandom,fn_do,[?RANGE_1000]),
+    %spawn(zrandom,fn_do,[?RANGE_10000]),
+    %spawn(zrandom,fn_do,[?RANGE_100000]),
+    fn_do(?RANGE_100),
+    fn_do(?RANGE_1000),
+    fn_do(?RANGE_10000),
+    fn_do(?RANGE_100000),
+    ok.
+
+fn_do(Modal)   ->
+    FileName = "test_"++integer_to_list(Modal)++".txt",
+    Map_result = maps:new(),
+
+    io:format("------------------- start:~p  !! --------------------~n",[Modal]),
+    NewMap = fn_loop(?LOOP_NUM,Modal,Map_result),
+
+    FileHandle = fn_open_file(?RESULT_FILE_PATH ++"/"++ FileName),
+    Fun = fun(K,V)  -> fn_write_result_2_file(FileHandle,{K,V}) end,
+
+    maps:map(Fun, NewMap),
+
+    io:format("------------------- finished:~p  !! --------------------~n",[Modal]),
+    fn_close_file(FileHandle),
+    ok.
+
+fn_loop(0,_,Map) ->
+    io:format("------------------- write to file start !! --------------------~n"),
+    Map;
+fn_loop(Num,Modal,MyMap)   ->
+    %io:format("------------------- NO.~p ~n",[?RANDOM_SPEED - Num + 1]),
+    Value = get_random(?RANDOM_SPEED),
+    NewMap = fn_judge_range(Value,Modal,MyMap),
+    fn_loop(Num-1,Modal,NewMap).
+
+fn_judge_range(Value,Modal,MyMap)  ->
+    Key = (Value-1) div Modal + 1,
+    case maps:find(Key,MyMap) of
+        {ok, Val}   ->
+            NewMap = maps:update(Key, Val+1, MyMap);
+        error       ->
+            NewMap = maps:put(Key, 1, MyMap)
+    end,
+    NewMap.
+
+fn_write_result_2_file(FileWrite, {Key,Value})    ->
+
+    io:format(FileWrite,"~p:~p\r\n",[Key,Value]),
+
+    ok.
+
+fn_open_file(FilePath)  ->
+    case filelib:is_file(FilePath) of
+        false    ->
+            ok;
+        true    ->
+            case filelib:is_dir(FilePath) of
+                true ->
+                    ok;
+                false ->
+                    file:delete(FilePath)
+            end
+    end,
+    %如果不存在，创建文件
+    {ok, Temp} = file:open(FilePath, [append]),
+    file:close(Temp),
+
+    %以append模式打开文件，准备写
+    {ok, FileWrite} = file:open(FilePath, [append]),
+    FileWrite.
+
+fn_close_file(FileHandle)   ->
+    file:close(FileHandle),
+    ok.
+
+%%%%%%%%%%%%%%%%%%%%% --- 对外接口 --- begin --- %%%%%%%%%%%%%%%%%%
+%%根据当前时间设置seed
+set_random_seed_by_current_time() ->
+    H1 = erlang:phash2(erlang:now()),
+    H2 = erlang:phash2(self()),
+    H3 = erlang:phash2(H1),
+    random:seed(H1, H2, H3).
+
+fn_need_set_seed_by_current_time(true)    ->
+    set_random_seed_by_current_time();
+fn_need_set_seed_by_current_time(false)    ->
+    ok.
+
+get_random(Rate) ->
+    %如果没有设置种子，初始化种子
+    BoolInitialized = ( get(random_seed) == undefined),
+    fn_need_set_seed_by_current_time(BoolInitialized),
+
+    Result = random:uniform(Rate),
+    Result.
+set_random_seed(SeedNumber) when is_number(SeedNumber)->
+    H1 = erlang:phash2(SeedNumber),
+    H2 = erlang:phash2(H1),
+    H3 = erlang:phash2(H2),
+    %利用输入的数设置种子
+    random:seed(H1, H2, H3);
+%%Seed格式::: {A1, A2, A3}
+set_random_seed(Seed) when is_tuple(Seed)->
+    random:seed(Seed).
+
+
+
+get_random(Start ,End) ->
+    %如果没有设置种子，初始化种子
+    BoolInitialized = ( get(random_seed) == undefined),
+    fn_need_set_seed_by_current_time(BoolInitialized),
+
+    Between = End-Start+1,
+    RandomResult = random:uniform(Between),
+    Result = RandomResult+Start-1,
+    Result.
+
+
+
+fn_choose_from_n(0, _N, List)    ->
+    List;
+fn_choose_from_n(Count, N, List)    ->
+    Rand = get_random(1, N),
+    case erlang:length([X || X<- List, X =:= Rand]) of
+        0   ->
+            fn_choose_from_n(Count-1, N, [Rand | List]);
+        _Other  ->
+            fn_choose_from_n(Count, N, List)
+    end.
+
+choose_from_n(Count, N) when(Count > N)->
+    lists:seq(1, N);
+choose_from_n(Count, N) ->
+    fn_choose_from_n(Count, N, []).
+
+
+fake_random_with_seed(SeedNumber, Start, End)   ->
+    %先随机一次，保证种子被设置了
+    _RandOnce = get_random(Start, End),
+    %获得当前的种子
+    SeedsOrig = get(random_seed),
+
+    H1 = erlang:phash2(SeedNumber),
+    H2 = erlang:phash2(H1),
+    H3 = erlang:phash2(H2),
+    %利用输入的数设置种子
+    random:seed(H1, H2, H3),
+    Result = get_random(Start, End),
+
+    %还原种子
+    put(random_seed, SeedsOrig),
+    Result.
